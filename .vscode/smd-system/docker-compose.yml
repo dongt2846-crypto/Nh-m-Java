@@ -1,0 +1,207 @@
+services:
+  # Database
+  mysql:
+    image: mysql:8.0
+    container_name: smd-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: smd_db
+      MYSQL_USER: smd_user
+      MYSQL_PASSWORD: smd_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  # PostgreSQL for AI service with pgvector
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: smd-postgres
+    environment:
+      POSTGRES_DB: smd_ai_db
+      POSTGRES_USER: smd_ai_user
+      POSTGRES_PASSWORD: smd_ai_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Redis for caching and queue
+  redis:
+    image: redis:7-alpine
+    container_name: smd-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Elasticsearch for full-text search
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: smd-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+
+  # Backend Core API
+  backend:
+    build: ./backend/smd-backend
+    container_name: smd-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/smd_db
+      - SPRING_DATASOURCE_USERNAME=smd_user
+      - SPRING_DATASOURCE_PASSWORD=smd_password
+      - SPRING_REDIS_HOST=redis
+      - AI_SERVICE_URL=http://ai-service:8000
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - ./logs:/app/logs
+
+  # AI Microservice
+  ai-service:
+    build: ./ai-service/smd-ai-service
+    container_name: smd-ai-service
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - BACKEND_URL=http://backend:8080
+      - POSTGRES_URL=postgresql://smd_ai_user:smd_ai_password@postgres:5432/smd_ai_db
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      - redis
+      - postgres
+      - elasticsearch
+    volumes:
+      - ./ai-models:/app/models
+
+  # Celery Worker for AI tasks
+  celery-worker:
+    build: ./ai-service/smd-ai-service
+    container_name: smd-celery-worker
+    command: celery -A app.workers.celery_worker worker --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - BACKEND_URL=http://backend:8080
+      - POSTGRES_URL=postgresql://smd_ai_user:smd_ai_password@postgres:5432/smd_ai_db
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      - redis
+      - ai-service
+      - postgres
+    volumes:
+      - ./ai-models:/app/models
+
+  # Frontend Web App
+  frontend:
+    build: ./frontend/smd-web
+    container_name: smd-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://host.docker.internal:8080
+    depends_on:
+      - backend
+
+  # Mobile App Development Server (optional)
+  mobile-dev:
+    build: ./mobile/smd-mobile
+    container_name: smd-mobile-dev
+    ports:
+      - "19000:19000"
+      - "19001:19001"
+      - "19002:19002"
+    environment:
+      - EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0
+    volumes:
+      - ./mobile/smd-mobile:/app
+      - /app/node_modules
+    profiles:
+      - dev
+
+  # Nginx Reverse Proxy (Production)
+  nginx:
+    image: nginx:alpine
+    container_name: smd-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - frontend
+      - backend
+      - ai-service
+    profiles:
+      - prod
+
+  # Monitoring - Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: smd-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    profiles:
+      - monitoring
+
+  # Monitoring - Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: smd-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
+  # Log Aggregation - Fluentd
+  fluentd:
+    build: ./monitoring/fluentd
+    container_name: smd-fluentd
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    volumes:
+      - ./monitoring/fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
+      - fluentd_data:/fluentd/log
+    depends_on:
+      - elasticsearch
+    profiles:
+      - monitoring
+
+volumes:
+  mysql_data:
+  postgres_data:
+  redis_data:
+  elasticsearch_data:
+  prometheus_data:
+  grafana_data:
+  fluentd_data:
