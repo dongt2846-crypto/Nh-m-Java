@@ -1,0 +1,76 @@
+package com.university.smd.entity;
+
+import jakarta.persistence.*;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "notifications")
+public class Notification {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
+    private User user;
+
+    private String title;
+    private String message;
+
+    @Enumerated(EnumType.STRING)
+    private NotificationType type;
+
+    private String entityType;
+    private Long entityId;
+
+    private boolean isRead = false;
+
+    @Column(name = "created_at")
+    private LocalDateTime createdAt = LocalDateTime.now();
+
+    public enum NotificationType {
+        SYLLABUS_SUBMITTED,
+        SYLLABUS_APPROVED,
+        SYLLABUS_REJECTED,
+        SYLLABUS_PUBLISHED,
+        SYSTEM_ANNOUNCEMENT
+    }
+
+    // Constructors
+    public Notification() {}
+
+    public Notification(User user, String title, String message, NotificationType type) {
+        this.user = user;
+        this.title = title;
+        this.message = message;
+        this.type = type;
+    }
+
+    // Getters and Setters
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+
+    public User getUser() { return user; }
+    public void setUser(User user) { this.user = user; }
+
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
+
+    public String getMessage() { return message; }
+    public void setMessage(String message) { this.message = message; }
+
+    public NotificationType getType() { return type; }
+    public void setType(NotificationType type) { this.type = type; }
+
+    public String getEntityType() { return entityType; }
+    public void setEntityType(String entityType) { this.entityType = entityType; }
+
+    public Long getEntityId() { return entityId; }
+    public void setEntityId(Long entityId) { this.entityId = entityId; }
+
+    public boolean isRead() { return isRead; }
+    public void setRead(boolean read) { isRead = read; }
+
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+}
